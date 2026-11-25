@@ -8,9 +8,11 @@
 - Eino 0.9.23
 - Eino ADK（Agent Development Kit）
 - 阿里云百炼 OpenAI 兼容接口
-- Redis：会话记忆、Checkpoint 持久化
+- Redis：会话缓存与 Checkpoint 持久化
+- MySQL：会话消息全量持久化
 - CozeLoop：链路追踪与可观测性
 - 本地文件后端：文件读取、写入、搜索和命令执行
+- Gin：SSE 流式聊天 Web UI
 
 ## 项目结构
 
@@ -22,7 +24,11 @@ eino-gfdemo/
 │   ├── PromptDemo/               # Prompt 模板与思维链示例
 │   └── AgenticModel/             # Agentic Model 示例
 ├── 02_ChatModelAgent/            # ADK 单 Agent 与多轮对话
-├── 03_Memory/                    # 基于 Redis 的会话历史持久化
+├── 03_Memory/                    # Redis、Redis + MySQL 会话存储
+│   ├── main.go                   # 会话存储示例选择菜单
+│   └── MemoryDemo/
+│       ├── redis存储会话.go
+│       └── redis+mysql存储会话.go
 ├── 04_DeepAgent/                 # DeepAgent、本地文件后端与工具调用
 │   ├── main.go                   # 文件系统 Agent 交互示例
 │   └── read_analyze/main.go      # CSV 文件读取与数据分析示例
@@ -31,11 +37,17 @@ eino-gfdemo/
 ├── 07_Interrupt与Resume/          # 人工介入、中断恢复与审批流程
 │   ├── eino-redis-hitl/          # 首次中断后审批恢复示例
 │   └── eino-redis-hitl_v2/       # 循环对话中的审批恢复示例
-├── data/sales.csv                # DeepAgent 读取分析的数据文件
+├── resources/data/sales.csv      # DeepAgent 读取分析的数据文件
 ├── pkg/
+│   ├── chat_store.go             # Redis + MySQL 会话消息存储
+│   ├── cmd_template.go           # 示例菜单公共方法
 │   ├── model_create.go           # 公共 ChatModel 创建函数
 │   ├── project_root.go           # 项目根目录解析
+│   ├── print_use_token.go        # Token 使用量输出
 │   └── redis_store.go            # Redis Checkpoint/会话存储实现
+├── ui/
+│   ├── main.go                   # Gin + SSE 聊天服务
+│   └── templates/index.html      # 聊天页面
 ├── go.mod
 ├── go.sum
 └── .gitignore
@@ -73,6 +85,13 @@ DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 COZELOOP_API_TOKEN=你的CozeLoopToken
 COZELOOP_WORKSPACE_ID=你的CozeLoop工作区ID
 PROJECT_ROOT=\eino-gfdemo
+```
+
+Redis + MySQL 会话存储示例还需要配置：
+
+```env
+REDIS_ADDR=127.0.0.1:6379
+MYSQL_DSN=user:password@tcp(127.0.0.1:3306)/eino_demo?charset=utf8mb4&parseTime=True&loc=Local
 ```
 
 > `.env` 已被 `.gitignore` 排除，不应提交真实密钥。
@@ -139,14 +158,16 @@ go run ./02_ChatModelAgent
 
 入口：[03_Memory/main.go](03_Memory/main.go)
 
-演示跨进程持久化会话历史：
+入口提供两种会话存储示例：
 
-- 将消息序列保存到 Redis。
-- 根据固定 Session ID 加载历史。
-- 新消息和 Agent 回复都会追加到历史并再次保存。
-- 本示例中的会话数据不设置过期时间，业务中可按需求设置 TTL。
+- 选项 1：将会话历史保存在 Redis Checkpoint Store 中，按固定 Session ID 加载和保存多轮对话。
+- 选项 2：将消息全量写入 MySQL，并在 Redis 中缓存最近 10 条消息，缓存有效期为 24 小时。
+- Redis + MySQL 示例包含天气查询工具；持久化历史保留用户消息和最终助手答复，不将工具调用中间态作为下一轮输入。
+- Redis + MySQL 示例配置摘要中间件，在上下文消息达到 25 条时触发摘要，并将摘要写入 MySQL；退出时会显示最近一次摘要。
 
-运行：
+Redis + MySQL 示例需要配置 `REDIS_ADDR` 和 `MYSQL_DSN`，并预先创建 MySQL 数据库；程序会自动迁移消息表和摘要表。
+
+运行并在菜单中选择示例：
 
 ```powershell
 go run ./03_Memory
@@ -174,7 +195,7 @@ CSV 分析示例：[04_DeepAgent/read_analyze/main.go](04_DeepAgent/read_analyze
 
 该示例演示：
 
-- 使用 `backend.Write` 创建或覆盖 [data/sales.csv](data/sales.csv)。
+- 使用 `backend.Write` 创建或覆盖 [resources/data/sales.csv](resources/data/sales.csv)。
 - 使用真实绝对路径调用 DeepAgent。
 - Windows 路径转换为正斜杠后传给 Agent。
 - 限制 Agent 使用只读工具，避免无意义的文件修改。
@@ -185,6 +206,18 @@ CSV 分析示例：[04_DeepAgent/read_analyze/main.go](04_DeepAgent/read_analyze
 ```powershell
 go run ./04_DeepAgent/read_analyze
 ```
+
+### Web UI
+
+入口：[ui/main.go](ui/main.go)
+
+提供 Gin 聊天页面和 SSE 流式接口。服务默认监听 `8080`，可通过 `PORT` 环境变量修改端口。
+
+```powershell
+go run ./ui
+```
+
+启动后访问 `http://localhost:8080`。调用模型仍需配置阿里云百炼环境变量。
 
 ### 05 - Middleware
 
@@ -266,10 +299,14 @@ go run ./07_Interrupt与Resume/eino-redis-hitl_v2
 
 [pkg/model_create.go](pkg/model_create.go)
 
-`pkg.NewChatModel(ctx)` 会：
+`pkg` 包初始化时从当前工作目录加载 `.env` 并校验以下必需变量；`pkg.NewChatModel(ctx)` 使用这些配置创建模型：
 
-- 自动加载项目根目录的 `.env`。
-- 校验三个必需环境变量。
+- `DASHSCOPE_API_KEY`
+- `DASHSCOPE_MODE`
+- `DASHSCOPE_BASE_URL`
+
+模型工厂会：
+
 - 创建阿里云百炼兼容 ChatModel。
 - 配置超时、Temperature、TopP 和最大 Token 数量。
 
@@ -290,31 +327,43 @@ go run ./07_Interrupt与Resume/eino-redis-hitl_v2
 - `Delete`：清理 Checkpoint。
 - `Save/Load`：保存或加载会话消息。
 
+### Redis + MySQL 会话存储
+
+[pkg/chat_store.go](pkg/chat_store.go)
+
+- MySQL 保存完整会话消息。
+- Redis List 使用 `RPush` 按时间顺序追加，读取结果无需反转；列表仅保留最近 10 条，缓存 TTL 为 24 小时。
+- Redis 缓存未命中时从 MySQL 读取最近消息并回填缓存。
+- `SaveSummary` 和 `GetLatestSummary` 用于持久化和读取会话摘要；缓存命中与回源时都会将最新摘要放入 Agent 历史上下文。
+- `Close` 释放 MySQL 连接池和 Redis 客户端。
+
 ## 常见运行方式
 
-运行任意独立示例：
+运行路径为 ASCII 的独立示例：
 
 ```powershell
-go run ./目录名
+go run ./01_ChatModel
+go run ./ui
 ```
 
-运行目录名包含中文或使用子目录时建议加引号：
+目录名包含中文时，直接指定 Go 源文件路径，避免 Go 将中文目录解析为 package import path：
 
 ```powershell
-go run './06_Callback与Trace'
-go run './07_Interrupt与Resume/eino-redis-hitl_v2'
+go run './06_Callback与Trace/main.go'
+go run './07_Interrupt与Resume/eino-redis-hitl_v2/main.go'
 ```
 
-编译整个模块：
+单独编译一个包：
 
 ```powershell
-go build ./...
+go build ./ui
+go build ./03_Memory
 ```
 
-格式化代码：
+由于部分目录名包含中文，`go build ./...` 目前会因非法 package import path 失败；若需全模块构建，应先将这些目录重命名为 ASCII 名称。格式化单个 Go 文件：
 
 ```powershell
-gofmt -w ./
+gofmt -w .\path\to\file.go
 ```
 
 ## 常见问题
@@ -339,10 +388,10 @@ redis-cli ping
 
 ### 读取文件失败
 
-本地文件后端直接读取操作系统路径，不会自动把 `/data/sales.csv` 映射为项目目录。应使用项目绝对路径，例如：
+本地文件后端直接读取操作系统路径，不会自动把 `/resources/data/sales.csv` 映射为项目目录。应使用项目绝对路径，例如：
 
 ```text
-/eino-gfdemo/data/sales.csv
+/eino-gfdemo/resources/data/sales.csv
 ```
 
 在 Windows 上可以将 `\\` 转换为 `/` 后传给模型和工具。

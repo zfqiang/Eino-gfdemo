@@ -18,6 +18,16 @@ type RedisSessionStore struct {
 	ttl    time.Duration
 }
 
+func NewRedisCheckPointStoreDefault() *RedisSessionStore {
+	client := redis.NewClient(&redis.Options{
+		Addr:     "localhost:6379",
+		Password: "",
+		DB:       0,
+	})
+	ttl := 24 * time.Hour
+	return NewRedisCheckPointStore(client, ttl)
+}
+
 func NewRedisCheckPointStore(client *redis.Client, ttl time.Duration) *RedisSessionStore {
 	return &RedisSessionStore{client: client, ttl: ttl}
 }
