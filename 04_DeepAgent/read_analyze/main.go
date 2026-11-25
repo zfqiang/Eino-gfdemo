@@ -27,7 +27,7 @@ func main() {
 	}
 
 	projectRoot := pkg.GetProjectRoot()
-	filePath := filepath.Join(projectRoot, "data", "sales.csv")
+	filePath := filepath.Join(projectRoot, "resources", "data", "sales.csv")
 	filePathForAgent := strings.ReplaceAll(filePath, "\\", "/")
 
 	// 可选：预先写入一个 CSV 文件，让 Agent 有东西可分析

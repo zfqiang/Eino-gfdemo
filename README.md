@@ -17,6 +17,10 @@
 ```text
 eino-gfdemo/
 ├── 01_ChatModel/                 # ChatModel 基础调用与流式输出
+│   ├── main.go                   # ChatModel 示例选择菜单
+│   ├── ChatModelDemo/            # 普通调用与流式调用示例
+│   ├── PromptDemo/               # Prompt 模板与思维链示例
+│   └── AgenticModel/             # Agentic Model 示例
 ├── 02_ChatModelAgent/            # ADK 单 Agent 与多轮对话
 ├── 03_Memory/                    # 基于 Redis 的会话历史持久化
 ├── 04_DeepAgent/                 # DeepAgent、本地文件后端与工具调用
@@ -95,6 +99,17 @@ redis-cli ping
 - 通过 `Stream` 接收流式响应。
 - 使用 `BindTools` 绑定工具描述，并演示模型返回工具调用参数。
 - 展示 Temperature、TopP、MaxTokens 等生成参数。
+- 使用 `prompt.FromMessages` 和 `{变量名}` 占位符构造可复用的 Prompt 模板。
+- 根据风格和领域动态生成 System Prompt。
+- 从结构体准备模板变量，并展示逐消息格式化结果。
+- 使用 System Prompt 和用户问题构造思维链推理流程。
+
+Prompt 示例位于 [01_ChatModel/PromptDemo](01_ChatModel/PromptDemo)：
+
+- [prompt基础.go](01_ChatModel/PromptDemo/prompt基础.go)：基础 FString 模板，演示 `{role}` 和 `{input}` 变量替换。
+- [动态模版.go](01_ChatModel/PromptDemo/动态模版.go)：根据专业、轻松、友好或正式风格动态生成 System Prompt。
+- [结构体模版.go](01_ChatModel/PromptDemo/结构体模版.go)：将 `UserProfile` 字段映射为模板变量。
+- [思维链.go](01_ChatModel/PromptDemo/思维链.go)：组合理解、分析、计算、验证和结论步骤，并调用 ChatModel 流式输出。
 
 运行：
 
