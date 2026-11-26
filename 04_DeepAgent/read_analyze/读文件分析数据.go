@@ -1,4 +1,4 @@
-package main
+package readanalyze
 
 import (
 	"context"
@@ -14,7 +14,7 @@ import (
 	"github.com/cloudwego/eino/adk/prebuilt/deep"
 )
 
-func main() {
+func ReadAnalyze() {
 	ctx := context.Background()
 
 	// 1. 创建支持工具调用的 ChatModel

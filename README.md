@@ -31,8 +31,13 @@ eino-gfdemo/
 │       └── redis+mysql存储会话.go
 ├── 04_DeepAgent/                 # DeepAgent、本地文件后端与工具调用
 │   ├── main.go                   # 文件系统 Agent 交互示例
-│   └── read_analyze/main.go      # CSV 文件读取与数据分析示例
-├── 05_Middleware/                # Middleware、工具错误转换与限流重试
+│   └── read_analyze/             # DeepAgent 文件操作与 CSV 分析示例
+│       ├── 官方实例.go
+│       ├── 文件复杂操作.go
+│       └── 读文件分析数据.go
+├── 05_Middleware/                # ADK 内置 Middleware 配置示例
+│   ├── main.go                   # DeepAgent、工具错误转换与模型重试示例
+│   └── middlewareDemo/           # 各类 Middleware 配置工厂
 ├── 06_Callback与Trace/            # Callback 与 CozeLoop 链路追踪
 ├── 07_Interrupt与Resume/          # 人工介入、中断恢复与审批流程
 │   ├── eino-redis-hitl/          # 首次中断后审批恢复示例
@@ -191,20 +196,16 @@ go run ./03_Memory
 go run ./04_DeepAgent
 ```
 
-CSV 分析示例：[04_DeepAgent/read_analyze/main.go](04_DeepAgent/read_analyze/main.go)
+`read_analyze` 目录提供以下函数级示例（该目录没有独立的 `main` 入口）：
 
-该示例演示：
+- [官方实例.go](04_DeepAgent/read_analyze/官方实例.go)：DeepAgent 官方风格的文件分析示例。
+- [文件复杂操作.go](04_DeepAgent/read_analyze/文件复杂操作.go)：使用文件系统和命令能力完成复杂文件操作。
+- [读文件分析数据.go](04_DeepAgent/read_analyze/读文件分析数据.go)：读取 [resources/data/sales.csv](resources/data/sales.csv)，分析 CSV 数据。
 
-- 使用 `backend.Write` 创建或覆盖 [resources/data/sales.csv](resources/data/sales.csv)。
-- 使用真实绝对路径调用 DeepAgent。
-- Windows 路径转换为正斜杠后传给 Agent。
-- 限制 Agent 使用只读工具，避免无意义的文件修改。
-- 读取 CSV 并指出营收最高的产品。
-
-运行：
+可单独编译检查这些示例：
 
 ```powershell
-go run ./04_DeepAgent/read_analyze
+go test ./04_DeepAgent/read_analyze
 ```
 
 ### Web UI
@@ -223,18 +224,37 @@ go run ./ui
 
 入口：[05_Middleware/main.go](05_Middleware/main.go)
 
-演示 Agent 的可扩展执行能力：
+章节入口演示 Agent 的可扩展执行能力：
 
 - 自定义工具错误中间件，将工具异常转换为可供模型继续处理的文本。
 - 配置模型重试策略，针对 429、Too Many Requests 和 qpm limit 进行重试。
 - 支持本地文件后端和 StreamingShell。
 - 包含流式对话和工具调用的交互循环。
-- 代码中保留了摘要和缩减 Middleware 的概念配置，可用于长上下文场景。
 
 运行：
 
 ```powershell
 go run ./05_Middleware
+```
+
+`middlewareDemo` 目录包含可复用的 Middleware 配置示例。它们由独立函数创建，当前不会由章节入口自动组合或执行：
+
+| 中间件         | 示例文件                                                                | 用途                                                  |
+| -------------- | ----------------------------------------------------------------------- | ----------------------------------------------------- |
+| Summarization  | [摘要配置.go](05_Middleware/middlewareDemo/摘要配置.go)                 | 按 Token 数或消息数触发摘要，并配置重试、降级和回调。 |
+| ToolReduction  | [工具结果压缩.go](05_Middleware/middlewareDemo/工具结果压缩.go)         | 截断过长工具输出、转存内容，并清理历史工具结果。      |
+| Filesystem     | [文件系统工具.go](05_Middleware/middlewareDemo/文件系统工具.go)         | 为 Agent 配置文件操作工具、Shell 和工具级选项。       |
+| ToolSearch     | [动态工具搜索.go](05_Middleware/middlewareDemo/动态工具搜索.go)         | 根据需要动态搜索和加载工具。                          |
+| PatchToolCalls | [修补悬空工具调用.go](05_Middleware/middlewareDemo/修补悬空工具调用.go) | 为缺少响应的工具调用补齐结果，保持消息历史有效。      |
+| Agents.md      | [指令文件注入.go](05_Middleware/middlewareDemo/指令文件注入.go)         | 将项目指令文件内容注入 Agent 上下文。                 |
+| PlanTask       | [任务规划.go](05_Middleware/middlewareDemo/任务规划.go)                 | 注入任务创建、查询、更新和列表工具。                  |
+
+Skill Middleware 也属于 Eino ADK 的内置能力，但本仓库目前没有对应的示例实现。
+
+单独检查这些 Middleware 配置示例是否可编译：
+
+```powershell
+go test ./05_Middleware/middlewareDemo
 ```
 
 ### 06 - Callback 与 CozeLoop Trace
@@ -365,8 +385,6 @@ go build ./03_Memory
 ```powershell
 gofmt -w .\path\to\file.go
 ```
-
-## 常见问题
 
 ### 缺少环境变量
 

@@ -195,9 +195,12 @@ func RedisMyssqlStore() {
 // 恰好提到“摘要”时也可能被误存为会话摘要。
 // extractSummaryText 从消息列表中提取摘要文本
 // 参数:
-//   msgs - 消息指针数组，每个元素都是指向Message结构体的指针
+//
+//	msgs - 消息指针数组，每个元素都是指向Message结构体的指针
+//
 // 返回值:
-//   string - 返回找到的摘要内容，如果没有找到则返回空字符串
+//
+//	string - 返回找到的摘要内容，如果没有找到则返回空字符串
 func extractSummaryText(msgs []*schema.Message) string {
 	// 遍历消息列表
 	for _, m := range msgs {
@@ -297,15 +300,21 @@ func RunChat(ctx context.Context, agent adk.Agent, store *pkg.ChatStore, session
 // assistant 的 tool_calls 必须与对应的 ToolMessage 成组出现；当前存储策略只
 // 保留最终答复，因此这里也会清除遗留的工具角色消息和未完成工具调用消息。
 func conversationHistory(messages []*schema.Message) []*schema.Message {
+	// 创建一个新的消息历史切片，初始容量为输入messages的长度
 	history := make([]*schema.Message, 0, len(messages))
+	// 遍历输入的消息列表
 	for _, message := range messages {
+		// 如果消息为nil或角色是Tool，则跳过该消息
 		if message == nil || message.Role == schema.Tool {
 			continue
 		}
+		// 如果消息角色是Assistant且包含工具调用，则跳过该消息
 		if message.Role == schema.Assistant && len(message.ToolCalls) > 0 {
 			continue
 		}
+		// 将符合条件消息添加到历史记录中
 		history = append(history, message)
 	}
+	// 返回处理后的消息历史
 	return history
 }
