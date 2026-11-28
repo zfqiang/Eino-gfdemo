@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/cloudwego/eino/adk"
+	"github.com/cloudwego/eino/components/tool"
+	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 )
 
@@ -24,10 +26,21 @@ func AgenticBase() {
 
 	//创建agent
 	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
-		Name:        "AI助手",
+		//Agent 名称
+		Name: "AI助手",
+		//Agent 能力说明
 		Description: "你是一个智能的AI助手",
+		//System Prompt, 默认会和输入消息一起喂给模型
 		Instruction: "你是一个智能的AI助手，请根据用户输入进行回答，先给结论再解释。",
-		Model:       model,
+		//模型
+		Model: model,
+		ToolsConfig: adk.ToolsConfig{
+			ToolsNodeConfig: compose.ToolsNodeConfig{
+				Tools: []tool.BaseTool{}, //工具列表
+			},
+		},
+		MaxIterations: 5,                                // 最大迭代次数
+		Handlers:      []adk.ChatModelAgentMiddleware{}, // 中间件,可以改写agent, model ,工具的调用过程
 	})
 	if err != nil {
 		log.Fatal("创建 ChatModelAgent 失败")

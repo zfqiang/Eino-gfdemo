@@ -24,10 +24,15 @@ func PromptChain() {
 	template := prompt.FromMessages(
 		schema.FString,
 		schema.SystemMessage(systemMessage),
+		schema.MessagesPlaceholder("history", false), // 添加历史消息 占位符 用于放历史消息
 		schema.UserMessage("{question}"),
 	)
 
 	variables := map[string]interface{}{
+		"history": []*schema.Message{
+			schema.UserMessage("what is eino?"),
+			schema.AssistantMessage("eino is a great framework to build llm apps", nil),
+		},
 		"question": "10+2+52-34=?",
 	}
 	messages, err := template.Format(ctx, variables)

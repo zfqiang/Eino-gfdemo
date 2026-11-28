@@ -170,6 +170,8 @@ func simulateAgentResponse(c *gin.Context, input string, history []Message) erro
 			return err
 		}
 		if err := writeSSEData(c.Writer, chunk.Content); err != nil {
+			writeSSEData(c.Writer, "流式接收失败，请稍后重试2。")
+			flusher.Flush()
 			return err
 		}
 		flusher.Flush()
