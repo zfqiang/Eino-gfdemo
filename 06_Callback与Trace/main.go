@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"eino-dfdemo/pkg"
 	"fmt"
 	"log"
 	"os"
@@ -12,7 +13,6 @@ import (
 
 	localbk "github.com/cloudwego/eino-ext/adk/backend/local"
 	clc "github.com/cloudwego/eino-ext/callbacks/cozeloop"
-	"github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/adk/prebuilt/deep"
 	"github.com/cloudwego/eino/callbacks"
@@ -20,57 +20,40 @@ import (
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 	"github.com/coze-dev/cozeloop-go"
-	"github.com/joho/godotenv"
 )
 
-var ctx context.Context
-var model *openai.ChatModel
-var err error
+/*
+Eino 的 Callback 机制核心定位是旁路观测钩子：它在 Agent、ChatModel、Tool 等组件生命周期的固定点位触发，抽取输入、输出、错误、Token 消耗等信息，而不干扰主业务流程。
 
-func init() {
-	ctx = context.Background()
+核心应用场景
+	全链路追踪与可观测性
+		这是最主要的场景。Agent 在运行时像一个“黑盒”，你只知道最终输出，却不清楚中间调用了多少次模型、每个 Tool 执行了多久、Token 消耗了多少。Callback 可以在 OnStart/OnEnd/OnError 等时机收集这些数据，接入 CozeLoop 等平台后，就能看到完整的调用链路和耗时分布。典型输出类似：[trace] chat_model_generate: model=gpt-4.1-mini tokens=150、[trace] tool_call: name=list_files duration=23ms。
 
-	if err = godotenv.Load(); err != nil {
-		log.Fatalf("加载 .env 文件失败: %v", err)
-	}
+	性能与成本分析
+		通过 Callback 收集的 Token 消耗数据和模型调用延迟，可以识别哪些对话消耗最高、哪个 Tool 执行最慢，从而优化 Prompt 或调整模型选择。全局 Handler 尤其适合这种业务无关的统一指标收集，通过 callbacks.AppendGlobalHandlers 在服务初始化时注入一次即可。
 
-	for _, name := range []string{"DASHSCOPE_API_KEY", "DASHSCOPE_MODE", "DASHSCOPE_BASE_URL"} {
-		if strings.TrimSpace(os.Getenv(name)) == "" {
-			log.Fatalf("缺少环境变量 %s", name)
-		}
-	}
+	调试与问题定位
+		当 Agent 输出不符合预期时，Callback 能帮你判断问题出在模型调用、工具执行还是中间件处理环节。例如，在 OnError 中记录完整的错误上下文，或在 OnEnd 中打印模型返回的 ToolCalls 内容，快速定位是 Prompt 问题还是工具参数问题。
 
-	// 创建模型
-	model, err = openai.NewChatModel(ctx, &openai.ChatModelConfig{
-		APIKey:  os.Getenv("DASHSCOPE_API_KEY"),
-		Model:   os.Getenv("DASHSCOPE_MODE"),
-		BaseURL: os.Getenv("DASHSCOPE_BASE_URL"),
+	Agent 级别的生命周期观测（v0.8.0+）
+		ADK 在 v0.8.0 引入了 Agent 级别的 Callback 支持，使用 adk.WithCallbacks 在 agent.Run 时注入 Handler。AgentCallbackOutput 中包含一个 AsyncIterator[*AgentEvent] 的事件流副本，Handler 可以异步消费它来实时观测 Agent 的每一步事件，而不会阻塞 Agent 执行。官方特别提醒：每个 Handler 拿到的是独立的事件流副本，必须异步消费，否则会阻塞 Agent 运行。
 
-		Timeout: 30 * time.Second,
 
-		// // 生成参数
-		Temperature: new(float32(0.7)), // 控制输出随机性，范围 [0.0, 2.0]，越高越随机
-		TopP:        new(float32(0.7)), // 核采样参数，范围 [0.0, 1.0]，越低越聚焦
-		MaxTokens:   new(int(500)),     // 限制最大生成 token 数量，范围 [1, 8192]
+使用方式速览
+	全局注入：callbacks.AppendGlobalHandlers(handler)，对所有后续运行生效，适合 tracing 和 logging。
+	Graph 运行时注入：compose.WithCallbacks(...)，可通过 DesignateNode 或 DesignateNodeByPath 精确指定生效的节点。
+	Agent 级别注入：agent.Run(ctx, input, adk.WithCallbacks(handler))。
+	Graph 外单独使用组件：需要手动用 callbacks.InitCallbacks 注入初始 RunInfo 和 Handlers，组件内部嵌套调用时用 ReuseHandlers 传递上下文，否则 Callback 无法正确触发。
 
-		// // 停止序列 - 遇到这些文本时停止生成
-		// Stop: []string{"\\n\\n", "总结:"},
+*/
 
-		// // 惩罚参数 - 控制重复度
-		// PresencePenalty:  new(float32(0.6)), // 存在惩罚，范围 [-2.0, 2.0]，正值增加新话题可能性
-		// FrequencyPenalty: new(float32(0.5)), // 频率惩罚，范围 [-2.0, 2.0]，正值减少重复词语
-	})
-	if err != nil {
-		log.Fatal("阿里云百炼  创建 ChatModel 失败")
-	}
-	fmt.Println("阿里云百炼  创建 ChatModel 成功")
-}
 func main() {
 	Demo()
 }
 
 func Demo() {
 	fmt.Println("开始执行")
+	ctx := context.Background()
 	backend, err := localbk.NewBackend(ctx, &localbk.Config{})
 	if err != nil {
 		log.Printf("创建后端失败: %v", err)
@@ -134,10 +117,11 @@ The project root directory is: %s
 
 Always use absolute paths when calling filesystem tools.`, projectRoot, projectRoot, projectRoot, projectRoot)
 
+	cm := pkg.GetBaiLianLLM(ctx)
 	agent, err := deep.New(ctx, &deep.Config{
 		Name:           "Ch04ToolAgent",
 		Description:    "ChatWithDoc agent with CozeLoop tracing.",
-		ChatModel:      model,
+		ChatModel:      cm,
 		Instruction:    defaultInstruction,
 		Backend:        backend, // 提供文件系统操作能力
 		StreamingShell: backend, // 提供命令执行能力

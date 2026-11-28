@@ -224,12 +224,13 @@ go run ./ui
 
 入口：[05_Middleware/main.go](05_Middleware/main.go)
 
-章节入口演示 Agent 的可扩展执行能力：
+章节入口演示 DeepAgent 的可扩展执行能力：
 
 - 自定义工具错误中间件，将工具异常转换为可供模型继续处理的文本。
 - 配置模型重试策略，针对 429、Too Many Requests 和 qpm limit 进行重试。
 - 支持本地文件后端和 StreamingShell。
 - 包含流式对话和工具调用的交互循环。
+- 使用 `DeepAgent` 的 `Handlers` 字段挂载 Middleware。
 
 运行：
 
@@ -237,21 +238,200 @@ go run ./ui
 go run ./05_Middleware
 ```
 
-`middlewareDemo` 目录包含可复用的 Middleware 配置示例。它们由独立函数创建，当前不会由章节入口自动组合或执行：
+`middlewareDemo` 目录分为“配置说明”和“应用实现”两类文件：
 
-| 中间件         | 示例文件                                                                | 用途                                                  |
-| -------------- | ----------------------------------------------------------------------- | ----------------------------------------------------- |
-| Summarization  | [摘要配置.go](05_Middleware/middlewareDemo/摘要配置.go)                 | 按 Token 数或消息数触发摘要，并配置重试、降级和回调。 |
-| ToolReduction  | [工具结果压缩.go](05_Middleware/middlewareDemo/工具结果压缩.go)         | 截断过长工具输出、转存内容，并清理历史工具结果。      |
-| Filesystem     | [文件系统工具.go](05_Middleware/middlewareDemo/文件系统工具.go)         | 为 Agent 配置文件操作工具、Shell 和工具级选项。       |
-| ToolSearch     | [动态工具搜索.go](05_Middleware/middlewareDemo/动态工具搜索.go)         | 根据需要动态搜索和加载工具。                          |
-| PatchToolCalls | [修补悬空工具调用.go](05_Middleware/middlewareDemo/修补悬空工具调用.go) | 为缺少响应的工具调用补齐结果，保持消息历史有效。      |
-| Agents.md      | [指令文件注入.go](05_Middleware/middlewareDemo/指令文件注入.go)         | 将项目指令文件内容注入 Agent 上下文。                 |
-| PlanTask       | [任务规划.go](05_Middleware/middlewareDemo/任务规划.go)                 | 注入任务创建、查询、更新和列表工具。                  |
+| 中间件 | 配置说明 | 应用实现 | 主要用途 |
+| --- | --- | --- | --- |
+| Summarization | [摘要配置.go](05_Middleware/middlewareDemo/摘要配置.go) | [摘要配置代码实现.go](05_Middleware/middlewareDemo/摘要配置代码实现.go) | 按 Token 或消息数压缩上下文，保留近期用户意图 |
+| ToolReduction | [工具结果压缩.go](05_Middleware/middlewareDemo/工具结果压缩.go) | [工具结果压缩实现代码.go](05_Middleware/middlewareDemo/工具结果压缩实现代码.go) | 截断超长工具结果、卸载原始内容并清理历史结果 |
+| Filesystem | [文件系统工具.go](05_Middleware/middlewareDemo/文件系统工具.go) | [文件系统工具代码实现.go](05_Middleware/middlewareDemo/文件系统工具代码实现.go) | 注入文件操作工具与可选 Shell 工具 |
+| ToolSearch | [动态工具搜索.go](05_Middleware/middlewareDemo/动态工具搜索.go) | [动态工具搜索实现代码.go](05_Middleware/middlewareDemo/动态工具搜索实现代码.go) | 工具库较大时按需搜索并加载工具 |
+| PatchToolCalls | [修补悬空工具调用.go](05_Middleware/middlewareDemo/修补悬空工具调用.go) | [修补悬空工具调用代码实现.go](05_Middleware/middlewareDemo/修补悬空工具调用代码实现.go) | 为缺少响应的 ToolCall 补占位 Tool 消息 |
+| Agents.md | [指令文件注入.go](05_Middleware/middlewareDemo/指令文件注入.go) | [指令注入代码实现.go](05_Middleware/middlewareDemo/指令注入代码实现.go) | 在模型调用前加载项目级指令文件 |
+| Skill | [技能加载.go](05_Middleware/middlewareDemo/技能加载.go) | [技能加载实现代码.go](05_Middleware/middlewareDemo/技能加载实现代码.go) | 按需加载 `SKILL.md` 技能文档 |
+| PlanTask | [任务规划.go](05_Middleware/middlewareDemo/任务规划.go) | [任务规划实现代码.go](05_Middleware/middlewareDemo/任务规划实现代码.go) | 注入任务创建、查询、更新和列表工具 |
 
-Skill Middleware 也属于 Eino ADK 的内置能力，但本仓库目前没有对应的示例实现。
+目录中的配置说明由工厂函数创建 Middleware；应用实现通过可运行的示例函数或入口演示完整生命周期。这些示例不会由章节入口自动组合或执行。
 
-单独检查这些 Middleware 配置示例是否可编译：
+#### Summarization - 上下文摘要
+
+配置入口：[摘要配置.go](05_Middleware/middlewareDemo/摘要配置.go)
+
+配置入口演示：
+
+- `Model`：摘要模型，可复用主模型，也可替换为更低成本模型。
+- `Trigger.ContextTokens`：按累计 Token 数触发，示例为 `160000`。
+- `Trigger.ContextMessages`：按消息数触发，示例为 `30` 条；任一触发条件满足即压缩。
+- `PreserveUserMessages`：保留最近用户消息，避免摘要丢失最新意图。
+- `Retry`：配置重试次数、重试条件和退避间隔。
+- `Failover`：主摘要模型失败时切换备用模型。
+- `Callback`：在压缩前后持久化摘要或记录状态。
+- `Finalize`：对摘要结果进行最终处理。
+- `EmitInternalEvents`：控制是否发送内部事件。
+
+完整实现：[摘要配置代码实现.go](05_Middleware/middlewareDemo/摘要配置代码实现.go)
+
+实现使用一个会累积较长文本的 `expand_topic` 工具，将消息阈值设置为较小的示例值（Token `3000`、消息数 `30`），便于观察压缩效果。生产环境应根据模型上下文窗口调整阈值。
+
+#### ToolReduction - 工具结果压缩
+
+配置入口：[工具结果压缩.go](05_Middleware/middlewareDemo/工具结果压缩.go)
+
+Middleware 包含两个阶段：
+
+- **Truncation**：单条工具输出超过字符阈值时截断，并把完整内容写入 Backend。
+- **Clear**：上下文总 Token 超过阈值时清理历史工具结果。
+
+关键配置：
+
+- `Backend`：保存截断或清理内容的存储后端。
+- `MaxLengthForTrunc`：默认约 `50000` 字符，可按业务收紧。
+- `MaxTokensForClear`：触发历史清理的累计 Token 阈值。
+- `ClearRetentionSuffixLimit`：保留最近 N 轮 assistant 消息。
+- `ClearAtLeastTokens`：只有可释放的 Token 达到下限才执行清理。
+- `TruncExcludeTools` / `ClearExcludeTools`：指定不参与截断或清理的工具。
+- `ReadFileToolName`：读取卸载内容的文件工具名，应与 Filesystem 中间件一致。
+- `RootDir`：截断和清理内容的存储目录。
+- `ToolConfig`：按工具覆盖截断、清理、Backend 和自定义 Handler。
+
+完整实现：[工具结果压缩实现代码.go](05_Middleware/middlewareDemo/工具结果压缩实现代码.go)
+
+示例提供 `fetch_big_data` 工具，演示获取 50 条记录时的截断和清理流程；示例阈值调为 `3000` 字符、`5000` Token，便于快速触发。
+
+#### Filesystem - 文件系统工具
+
+配置入口：[文件系统工具.go](05_Middleware/middlewareDemo/文件系统工具.go)
+
+可注入的文件能力包括：
+
+- `ls`：列出目录。
+- `read_file`：读取文本或多模态文件。
+- `write_file`：写入文件。
+- `edit_file`：编辑文件。
+- `glob`：按模式查找文件。
+- `grep`：搜索文件内容。
+- `execute`：配置 `Shell` 后执行命令。
+
+可通过各工具的 `ToolConfig` 修改工具名、描述、禁用状态或自定义实现。`Shell` 与 `StreamingShell` 互斥，示例中可以使用本地 Backend 实现流式 Shell。
+
+完整实现：[文件系统工具代码实现.go](05_Middleware/middlewareDemo/文件系统工具代码实现.go)
+
+实现会创建 `/tmp/eino-fs-demo/hello.go`，并让 Agent 列目录、读取文件和搜索 `TODO` 行。由于示例按操作系统路径运行，请在 Windows 上自行核对本地 Backend 的路径支持和权限。
+
+#### ToolSearch - 动态工具搜索
+
+配置入口：[动态工具搜索.go](05_Middleware/middlewareDemo/动态工具搜索.go)
+
+大型工具库不再一次性全部加入模型上下文，而是：
+
+1. 将工具放入 `DynamicTools`。
+2. 模型通过 `tool_search` 元工具按名称或描述搜索工具。
+3. 只有匹配到的工具才加载到当前可见工具列表。
+4. 设置 `UseModelToolSearch=false` 时由中间件管理可见性。
+
+完整实现：[动态工具搜索实现代码.go](05_Middleware/middlewareDemo/动态工具搜索实现代码.go)
+
+实现演示 CRM 搜索、ERP 库存、工单创建和文档搜索四类工具；其中 HTTP 调用参数结构已定义，仓库示例中的部分外部接口实现可按实际系统补充。
+
+#### PatchToolCalls - 修补悬空工具调用
+
+配置入口：[修补悬空工具调用.go](05_Middleware/middlewareDemo/修补悬空工具调用.go)
+
+当 Assistant 的 ToolCall 缺少对应 ToolResult 时，中间件会在模型调用前扫描历史并补齐占位响应，常见于：
+
+- 用户中途打断工具执行。
+- 会话恢复后工具结果丢失。
+- Human-in-the-loop 场景中用户拒绝执行。
+
+可配置：
+
+- `PatchedContentGenerator`：自定义占位内容。
+- `PatchedToolResultGenerator`：自定义补丁工具结果。
+
+完整实现：[修补悬空工具调用代码实现.go](05_Middleware/middlewareDemo/修补悬空工具调用代码实现.go)
+
+实现构造了一段缺少 `call_weather_001` 对应 ToolResult 的历史，并演示中间件如何插入占位 Tool 消息。建议将该 Middleware 放在中间件链前部，使其他处理发生前先修复消息。
+
+#### Agents.md - 指令文件注入
+
+配置入口：[指令文件注入.go](05_Middleware/middlewareDemo/指令文件注入.go)
+
+中间件在每次模型调用前读取并注入 `Agents.md` 及其引用文件，适合集中维护项目级编码规范、回复格式和安全约束。
+
+关键配置：
+
+- `Backend`：实现指令文件读取能力。
+- `AgentsMDFiles`：要加载的文件列表。
+- `AllAgentsMDMaxBytes`：所有文件的总字节上限。
+- `OnLoadWarning`：处理文件缺失、循环 `@import` 等非致命警告。
+
+完整实现：[指令注入代码实现.go](05_Middleware/middlewareDemo/指令注入代码实现.go)
+
+实现会读取本地 Backend 中的指令文件并挂载到 Agent。文件不存在时应返回包裹 `os.ErrNotExist` 的错误，才能被 Loader 当作非致命警告。
+
+#### Skill - 技能按需加载
+
+[技能加载.go](05_Middleware/middlewareDemo/技能加载.go) 演示 Skill 的目录结构，完整实现位于 [技能加载实现代码.go](05_Middleware/middlewareDemo/技能加载实现代码.go)。
+
+每个技能是 `skills/<技能名>/SKILL.md`，内容包含：
+
+```text
+---
+name: skill-name
+description: 技能用途和触发场景
+---
+
+# 技能内容
+```
+
+Agent 启动时只加载技能的 `name` 和 `description`；任务匹配后，通过 `skill` 工具加载完整文档。技能引用的脚本、资源和文件通常还需要同时挂载 Filesystem Middleware。
+
+示例会创建本地技能目录，并分别演示 PDF 处理和 Go Code Review 技能。技能目录名、frontmatter 和描述应保持明确，便于模型准确判断何时加载。
+
+#### PlanTask - 任务规划与追踪
+
+配置入口：[任务规划.go](05_Middleware/middlewareDemo/任务规划.go)
+
+Middleware 注入以下工具：
+
+- `TaskCreate`：创建任务和子任务。
+- `TaskGet`：查询任务详情。
+- `TaskUpdate`：更新状态、结果和依赖。
+- `TaskList`：列出任务及进度。
+
+关键配置：
+
+- `Backend`：任务持久化后端，不同会话应使用独立实例。
+- `BaseDir`：任务 JSON 文件的存储目录。
+
+完整实现：[任务规划实现代码.go](05_Middleware/middlewareDemo/任务规划实现代码.go)
+
+实现提供内存版 Backend，演示将登录功能拆解为前端、后端和数据库任务并设置依赖。内存 Backend 重启后不保留任务；生产环境应使用持久化 Backend。
+
+#### Middleware 组合建议
+
+```go
+Handlers: []adk.ChatModelAgentMiddleware{
+    patchMW,       // 先修复悬空工具调用
+    summarizationMW,
+    reductionMW,
+    agentsMDMW,
+    skillMW,
+    fsMW,
+    toolSearchMW,
+    planTaskMW,
+}
+```
+
+实际中间件顺序应根据业务需求调整：
+
+- PatchToolCalls 应尽量放在处理消息状态的前部。
+- Filesystem 与 Reduction 配合时，确保 `ReadFileToolName` 与文件工具名一致。
+- Skill 与 Filesystem 配合时，文件资源可读。
+- Agents.md 和 Skill 都会增加上下文，需控制文件、技能和摘要阈值。
+- 自定义工具错误中间件应保留 Interrupt 中断错误，避免将人工审批错误转换成普通成功结果。
+
+检查 Middleware 示例包：
 
 ```powershell
 go test ./05_Middleware/middlewareDemo
